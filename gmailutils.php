@@ -1,4 +1,136 @@
 <?php
+require_once ('./config.php');
+require_once ('./oauth/gmailoauth.php');
+require_once ('./handmadeimap.php');
+require_once ('./maildomainutils.php');
+require_once ('./peteutils.php');
+/**
+ * This is required as all oauth data is saved in session.
+ */
+session_start();
+
+function handle_gmail_oauth(){
+    
+    if (!isset($_SESSION['emailaddress'])){
+        
+        if (!empty($_REQUEST['emailaddress'])){
+            $_SESSION['emailaddress'] = $_REQUEST['emailaddress'];
+        }
+        else{
+            
+?>
+            <form method="GET" action="index.php">
+            Gmail address: <input type="text" size="40" name="emailaddress" value=""/>
+            <input type="submit" value="Authorize"/>
+            </form>
+<?php
+            return;
+        }
+    }
+
+    $emailaddress = $_SESSION['emailaddress'];
+    $oauthstate = get_gmail_oauth_state();
+    
+    // If there's no oAuth state stored at all, then we need to initialize one with our request
+    // information, ready to create a request URL.
+    if (!isset($oauthstate)){
+        $to = new GmailOAuth(GOOGLE_API_KEY_PUBLIC, GOOGLE_API_KEY_PRIVATE);
+		
+        // This call can be unreliable if the Gmail API servers are under a heavy load, so
+        // retry it with an increasing amount of back-off if there's a problem.
+        $maxretrycount = 1;
+        $retrycount = 0;
+        while ($retrycount<$maxretrycount)
+        {		
+                $tok = $to->getRequestToken();
+                if (isset($tok['oauth_token'])&&
+                        isset($tok['oauth_token_secret']))
+                        break;
+
+                $retrycount += 1;
+                sleep($retrycount*5);
+        }
+
+        $tokenpublic = $tok['oauth_token'];
+        $tokenprivate = $tok['oauth_token_secret'];
+        $state = 'start';
+		
+        // Create a new set of information, initially just containing the keys we need to make
+        // the request.
+        $oauthstate = array(
+                'request_token' => $tokenpublic,
+                'request_token_secret' => $tokenprivate,
+                'access_token' => '',
+                'access_token_secret' => '',
+                'state' => $state,
+        );
+
+        set_gmail_oauth_state($oauthstate);
+    }
+
+    // If there's an 'oauth_token' in the URL parameters passed into us, and we don't already
+    // have access tokens stored, this is the user being returned from the authorization page.
+    // Retrieve the access tokens and store them, and set the state to 'done'.
+    if (isset($_REQUEST['oauth_token'])&& ($oauthstate['access_token']=='')){
+            
+            error_log('$_REQUEST: '.print_r($_REQUEST, true));
+            
+            $urlaccesstoken = $_REQUEST['oauth_token'];
+            $requesttoken = $oauthstate['request_token'];
+            $requesttokensecret = $oauthstate['request_token_secret'];
+	
+            $to = new GmailOAuth(
+                    GOOGLE_API_KEY_PUBLIC, 
+                    GOOGLE_API_KEY_PRIVATE,
+                    $requesttoken,
+                    $requesttokensecret
+            );
+		
+            $tok = $to->getAccessToken();
+
+            $accesstoken = $tok['oauth_token'];
+            $accesstokensecret = $tok['oauth_token_secret'];
+
+            $oauthstate['access_token'] = $accesstoken;
+            $oauthstate['access_token_secret'] = $accesstokensecret;
+            $oauthstate['state'] = 'done';
+
+            set_gmail_oauth_state($oauthstate);		
+    }
+
+    $state = $oauthstate['state'];
+	
+    if ($state=='start'){
+        // This is either the first time the user has seen this page, or they've refreshed it before
+        // they've authorized us to access their information. Either way, display a link they can
+        // click that will take them to the authorization page.
+        $tokenpublic = $oauthstate['request_token'];
+        $to = new GmailOAuth(GOOGLE_API_KEY_PUBLIC, GOOGLE_API_KEY_PRIVATE);
+        $requestlink = $to->getAuthorizeURL($tokenpublic, get_current_url());
+?>
+        <h1>Click this link to authorize accessing messages from <?=htmlspecialchars($emailaddress)?></h1>
+        <br><br>
+        <a href="<?=$requestlink?>"><?=$requestlink?></a>
+<?php
+    }
+    else{
+        // We've been given some access tokens, so try and use them to make an API call, and
+        // display the results.
+        
+        $accesstoken = $oauthstate['access_token'];
+        $accesstokensecret = $oauthstate['access_token_secret'];
+        
+        $connection = gmail_login($emailaddress, $accesstoken, $accesstokensecret);
+        
+        //now go ahead and do the magic    
+	$receivedmailbox = 'Inbox';
+        handmadeimap_select($connection, $receivedmailbox);
+        $searchresults = handmadeimap_search_message($connection, "Search phrase");
+        echo "Found ".count($searchresults)." messages";
+        handmadeimap_close_connection($connection);
+        
+    }	
+}
 
 function gmail_login($emailaddress, $accesstoken, $accesstokensecret)
 {
@@ -36,88 +168,7 @@ function gmail_login($emailaddress, $accesstoken, $accesstokensecret)
     return $connection;
 }
 
-function fetch_senders_and_recipients($connection, $mailbox, $count)
-{
-    $selectresult = handmadeimap_select($connection, $mailbox);
-    if (!handmadeimap_was_ok())
-        die("SELECT failed: ".handmadeimap_get_error()."\n");
 
-    $totalcount = $selectresult['totalcount'];
-
-    $startindex = ($totalcount-$count);
-    $endindex = $totalcount;
-    
-    $fetchresult = handmadeimap_fetch_envelopes($connection, $startindex, $endindex);
-    if (!handmadeimap_was_ok())
-        die("FETCH failed: ".handmadeimap_get_error()."\n");
-    
-    $addresslist = array(
-        'from' => array(),
-        'to' => array(),
-        'cc' => array(),
-        'bcc' => array(),
-    );
-    $addresstodisplay = array();
-    foreach ($fetchresult as $envelope)
-    {
-        $from = $envelope['from'];
-        $fromcomponents = $from[0];
-        $fromaddress = $fromcomponents['address'];
-        $fromdisplay = $fromcomponents['display'];
-        
-        $addresstodisplay[$fromaddress] = $fromdisplay;
-        $addresslist['from'][] = $fromaddress;
-        
-        foreach ($envelope['to'] as $tocomponents)
-        {
-            $toaddress = $tocomponents['address'];
-            $todisplay = $tocomponents['display'];            
-
-            $addresstodisplay[$toaddress] = $todisplay;
-            $addresslist['to'][] = $toaddress;
-        }
-
-        foreach ($envelope['cc'] as $cccomponents)
-        {
-            $ccaddress = $cccomponents['address'];
-            $ccdisplay = $cccomponents['display'];            
-
-            $addresstodisplay[$ccaddress] = $ccdisplay;
-            $addresslist['cc'][] = $ccaddress;
-        }
-
-        foreach ($envelope['bcc'] as $bcccomponents)
-        {
-            $bccaddress = $bcccomponents['address'];
-            $bccdisplay = $bcccomponents['display'];            
-
-            $addresstodisplay[$bccaddress] = $bccdisplay;
-            $addresslist['bcc'][] = $bccaddress;
-        }
-    }
-    
-    $addresscounts = array(
-        'from' => array_count_values($addresslist['from']),
-        'to' => array_count_values($addresslist['to']),
-        'cc' => array_count_values($addresslist['cc']),
-        'bcc' => array_count_values($addresslist['bcc']),
-    );
-    
-    $result = array();
-    foreach ($addresscounts as $role => $countmap)
-    {
-        $result[$role] = array();
-        foreach ($countmap as $address => $count)
-        {
-            $result[$role][$address] = array(
-                'count' => $count,
-                'display' => $addresstodisplay[$address],
-            );
-        }
-    }
-        
-    return $result;
-}
 
 // Returns information about the oAuth state for the current user. This includes whether the process
 // has been started, if we're waiting for the user to complete the authorization page on the remote
@@ -140,9 +191,7 @@ function get_gmail_oauth_state()
     if (empty($_SESSION['gmailoauthstate']))
         return null;
         
-    $result = $_SESSION['gmailoauthstate'];
-
-    return $result;
+    return $_SESSION['gmailoauthstate'];
 }
 
 // Updates the information about the user's progress through the oAuth process.

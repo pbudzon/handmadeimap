@@ -1,6 +1,6 @@
 <?php
 /**
- * This file contains the API keys needed to access the Twitter via oAuth
+ * This file contains the API keys needed to access via oAuth
  *
  * Before you can use this example, you'll need to replace the two values below with your own
  * keys. To do this, go to https://www.google.com/accounts/ManageDomains and register.

@@ -1,59 +1,4 @@
 <?php
-/** 
- * This module implements a subset of the IMAP protocol, using PHP's socket
- * interface rather than relying on an extension like php-imap. Why would
- * you want to do such a thing?
- *
- * o This supports pulling down all 'to' recipients when grabbing just headers
- * o You can use it to log into ordinary Yahoo accounts, using their mangled
- *   version of IMAP:
- *   http://groups.google.com/group/mozilla.dev.apps.thunderbird/browse_thread/thread/546356554c73f8ca
- * o It's a lot more hackable to support extensions like oAuth for Gmail:
- *   http://sites.google.com/site/oauthgoog/Home/oauthimap
- *
- * Unfortunately it doesn't implement the complete IMAP protocol, only the
- * pieces I've needed for my projects. This includes logging in, getting
- * lists of mailboxes, messages since a certain date and complete header
- * information, but not downloading actual message bodies.
- *
- * To extend it yourself, check out the RFC spec at:
- * http://www.faqs.org/rfcs/rfc3501.html
- * The basic process is sending a text command using
- * handmade_send_command() and getting the result back from
- * handmadeimap_get_command_result().
- *
- * It uses globals for error checking and parsing, so interleaving commands for 
- * different connections may cause problems.
- *
-
- Licensed under the 2-clause (ie no advertising requirement) BSD license,
- making it easy to reuse for commercial or GPL projects:
- 
- (c) Pete Warden <pete@petewarden.com> http://petewarden.typepad.com/ - Mar 11th 2010
- 
- Redistribution and use in source and binary forms, with or without modification, are
- permitted provided that the following conditions are met:
-
-   1. Redistributions of source code must retain the above copyright notice, this 
-      list of conditions and the following disclaimer.
-   2. Redistributions in binary form must reproduce the above copyright notice, this 
-      list of conditions and the following disclaimer in the documentation and/or 
-      other materials provided with the distribution.
-   3. The name of the author may not be used to endorse or promote products derived 
-      from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
-INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
-FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, 
-BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR 
-PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, 
-WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
-ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY
-OF SUCH DAMAGE.
- 
- */
-
 
 // Each client command requires a unique ID, so that the server can reference it when
 // returning results. I use an incrementing counter to generate the ID
@@ -780,7 +725,14 @@ function handmadeimap_test_envelope_parsing()
     print_r($testresult);
 }
 
-function handmadeimap_search_message($connection, $pattern)
+/**
+ * Searches messages bodies with gmail-specific extension to SEARCH.
+ * @see http://code.google.com/apis/gmail/imap/#x-gm-raw
+ * @param resource $connection Connection resource (returned from handmadeimap_open_connection())
+ * @param string $pattern String to search for.
+ * @return array Array containing ids of matching messages.
+ */
+function handmadeimap_search_gmail_message($connection, $pattern)
 {
     $searchid = handmadeimap_send_command($connection, 'SEARCH X-GM-RAW "'.$pattern.'"');
     $searchresult = handmadeimap_get_command_result($connection, $searchid);
@@ -804,9 +756,37 @@ function handmadeimap_search_message($connection, $pattern)
     return $result;
 }
 
+/**
+ * Fetches message body.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return string Raw message body. 
+ */
 function handmadeimap_fetch_message_body($connection, $messageindex)
 {
-    $fetchcommand = "FETCH $messageindex (BODY[TEXT])";
+    $fetchcommand = "FETCH $messageindex (BODY[TEXT])"; 
+
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+    
+    $result = "";
+
+    foreach ($fetchresult['infolines'] as $infoline){
+        $result .= str_replace("* $messageindex FETCH (BODY[TEXT] ", "", $infoline);
+    }
+        
+    return quoted_printable_decode($result);
+}
+
+
+function handmadeimap_fetch_size($connection, $messageindex){
+    $fetchcommand = "FETCH $messageindex RFC822.SIZE";
+    
     $fetchid = handmadeimap_send_command($connection, $fetchcommand);
     $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
     $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
@@ -817,12 +797,19 @@ function handmadeimap_fetch_message_body($connection, $messageindex)
     
     $result = "";
     
-    foreach ($fetchresult['infolines'] as $infoline)
-        $result .= handmadeimap_parse_message_body($messageindex, $infoline);
-    
+    foreach ($fetchresult['infolines'] as $infoline){
+        $result = str_replace("* $messageindex FETCH (RFC822.SIZE ", "", $infoline);
+        $result = str_replace(")", "", $result);
+    }
     return $result;
 }
 
+/**
+ * Parses body messages returned from FETCH - removes "* xxx FETCH ...".
+ * @param int $index Index of the message that was fetched.
+ * @param string $message Raw message.
+ * @return string Cleared message. 
+ */
 function handmadeimap_parse_message_body($index, $message){
     $message = str_replace("* $index FETCH (BODY[TEXT] ", "", $message);
     return $message;
