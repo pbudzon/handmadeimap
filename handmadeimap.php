@@ -785,7 +785,14 @@ function handmadeimap_test_envelope_parsing()
     print_r($testresult);
 }
 
-function handmadeimap_search_message($connection, $pattern)
+/**
+ * Searches messages bodies with gmail-specific extension to SEARCH.
+ * @see http://code.google.com/apis/gmail/imap/#x-gm-raw
+ * @param resource $connection Connection resource (returned from handmadeimap_open_connection())
+ * @param string $pattern String to search for.
+ * @return array Array containing ids of matching messages.
+ */
+function handmadeimap_search_gmail_message($connection, $pattern)
 {
     $searchid = handmadeimap_send_command($connection, 'SEARCH X-GM-RAW "'.$pattern.'"');
     $searchresult = handmadeimap_get_command_result($connection, $searchid);
@@ -809,6 +816,12 @@ function handmadeimap_search_message($connection, $pattern)
     return $result;
 }
 
+/**
+ * Fetches message body.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return string Raw message body. 
+ */
 function handmadeimap_fetch_message_body($connection, $messageindex)
 {
     $fetchcommand = "FETCH $messageindex (BODY[TEXT])";
@@ -828,6 +841,12 @@ function handmadeimap_fetch_message_body($connection, $messageindex)
     return $result;
 }
 
+/**
+ * Parses body messages returned from FETCH - removes "* xxx FETCH ...".
+ * @param int $index Index of the message that was fetched.
+ * @param string $message Raw message.
+ * @return string Cleared message. 
+ */
 function handmadeimap_parse_message_body($index, $message){
     $message = str_replace("* $index FETCH (BODY[TEXT] ", "", $message);
     return $message;
