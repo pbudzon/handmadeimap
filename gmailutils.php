@@ -1,11 +1,5 @@
 <?php
 
-require_once ('./config.php');
-require_once ('../peteutils.php');
-require_once ('./oauth/gmailoauth.php');
-require_once ('../handmadeimap.php');
-require_once ('../maildomainutils.php');
-
 function gmail_login($emailaddress, $accesstoken, $accesstokensecret)
 {
     $to = new GmailOAuth(
@@ -125,10 +119,57 @@ function fetch_senders_and_recipients($connection, $mailbox, $count)
     return $result;
 }
 
-function suppress_date_warning()
+// Returns information about the oAuth state for the current user. This includes whether the process
+// has been started, if we're waiting for the user to complete the authorization page on the remote
+// server, or if the user has authorized us and if so the access keys we need for the API.
+// If no oAuth process has been started yet, null is returned and it's up to the client to kick it off
+// and set the new information.
+// This is all currently stored in session variables, but for real applications you'll probably want
+// to move it into your database instead.
+//
+// The oAuth state is made up of the following members:
+//
+// request_token: The public part of the token we generated for the authorization request.
+// request_token_secret: The secret part of the authorization token we generated.
+// access_token: The public part of the token granting us access. Initially ''. 
+// access_token_secret: The secret part of the access token. Initially ''.
+// state: Where we are in the authorization process. Initially 'start', 'done' once we have access.
+
+function get_gmail_oauth_state()
 {
-    if (function_exists("date_default_timezone_set") && function_exists("date_default_timezone_get"))
-        date_default_timezone_set(@date_default_timezone_get());
+    if (empty($_SESSION['gmailoauthstate']))
+        return null;
+        
+    $result = $_SESSION['gmailoauthstate'];
+
+    return $result;
 }
+
+// Updates the information about the user's progress through the oAuth process.
+function set_gmail_oauth_state($state)
+{
+    $_SESSION['gmailoauthstate'] = $state;
+}
+
+// Returns an authenticated object you can use to access the OAuth Gmail API
+function get_gmail_oauth_accessor()
+{
+    $oauthstate = get_gmail_oauth_state();
+    if ($oauthstate===null)
+        return null;
+    
+    $accesstoken = $oauthstate['access_token'];
+    $accesstokensecret = $oauthstate['access_token_secret'];
+
+    $to = new GmailOAuth(
+        GOOGLE_API_KEY_PUBLIC, 
+        GOOGLE_API_KEY_PRIVATE,
+        $accesstoken,
+        $accesstokensecret
+    );
+
+    return $to;
+}
+
 
 ?>

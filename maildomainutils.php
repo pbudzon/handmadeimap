@@ -144,8 +144,6 @@ function get_mailers_for_domain($domain)
     {
         $mailers[] = gethostbyname($domain);
     }
-
-    pete_log('accounts', 'Found MX hosts: '.print_r($mailers, true));
     
     return $mailers;
 }
@@ -167,13 +165,8 @@ function get_imap_domain_from_domain($domain)
             $reversealias = strrev($candidatealias);
             if (strncmp($reversemxdomain, $reversealias, strlen($reversealias))==0)
             {
-                pete_log('accounts', 'Found alias '.$actualdomain.' for '.$mxdomain);
                 $mxdomain = $actualdomain;
                 break;
-            }
-            else
-            {
-                pete_log('accounts', 'Alias '.$actualdomain.' doesn\'t match '.$mxdomain);            
             }
         }
 
@@ -184,12 +177,7 @@ function get_imap_domain_from_domain($domain)
             $reversekey = strrev($domainkey);
             if (strncmp($reversemxdomain, $reversekey, strlen($reversekey))==0)
             {
-                pete_log('accounts', 'Found host '.$domainkey.' for '.$domain);
                 return $domainkey;
-            }
-            else
-            {
-                pete_log('accounts', 'Host '.$domainkey.' doesn\'t match '.$domain);
             }
         }
     }
@@ -206,11 +194,8 @@ function get_imap_info_for_address($address)
     
     if ($imapdomain==null)
     {
-        pete_log('accounts', 'No host found for '.$address);
         return null;
     }
-
-    pete_log('accounts', 'Host '.$imapdomain.' found for '.$address);
         
     $result = $g_domainimapinfo[$imapdomain];
     

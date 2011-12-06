@@ -54,7 +54,6 @@ OF SUCH DAMAGE.
  
  */
 
-require_once("peteutils.php");
 
 // Each client command requires a unique ID, so that the server can reference it when
 // returning results. I use an incrementing counter to generate the ID
@@ -84,9 +83,7 @@ function handmadeimap_send_command($connection, $command)
     
     $commandline = "$commandid $command\r\n";    
     fwrite($connection, $commandline);
-    
-    pete_log('handmadeimap', "Sent '$commandline'");
-    
+        
     return $commandid;
 }
 
@@ -168,8 +165,6 @@ function handmadeimap_get_command_result($connection, $commandid)
                 else if (($outputchar==chr(10))&&($previouschar==chr(13)))
                 {            
                     $outputline = trim($outputline);
-
-                    pete_log('handmadeimap', "Received '$outputline'");
                     
                     $spacearray = explode(" ", $outputline);
                     $resultid = $spacearray[0];
