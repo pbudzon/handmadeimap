@@ -785,4 +785,53 @@ function handmadeimap_test_envelope_parsing()
     print_r($testresult);
 }
 
+function handmadeimap_search_message($connection, $pattern)
+{
+    $searchid = handmadeimap_send_command($connection, 'SEARCH X-GM-RAW "'.$pattern.'"');
+    $searchresult = handmadeimap_get_command_result($connection, $searchid);
+    $searchwasok = handmadeimap_was_command_ok($searchresult['resultline']);
+    if (!$searchwasok)
+        handmadeimap_set_error("SEARCH failed with '".$searchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+
+    $result = array();
+    foreach ($searchresult['infolines'] as $infoline)
+    {
+        $parts = explode(' ', $infoline);
+        // Remove "* SEARCH"
+        unset($parts[0]);
+        unset($parts[1]);
+    
+        $result = array_merge($result, $parts);
+    }
+    
+    return $result;
+}
+
+function handmadeimap_fetch_message_body($connection, $messageindex)
+{
+    $fetchcommand = "FETCH $messageindex (BODY[TEXT])";
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+    
+    $result = "";
+    
+    foreach ($fetchresult['infolines'] as $infoline)
+        $result .= handmadeimap_parse_message_body($messageindex, $infoline);
+    
+    return $result;
+}
+
+function handmadeimap_parse_message_body($index, $message){
+    $message = str_replace("* $index FETCH (BODY[TEXT] ", "", $message);
+    return $message;
+}
+
+
 ?>
