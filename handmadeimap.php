@@ -216,7 +216,7 @@ function handmadeimap_was_command_ok($commandresult)
     if ($commandresult=='')
         return false;
         
-    $commandparts = split(' ', $commandresult);
+    $commandparts = explode(' ', $commandresult);
     if (count($commandparts)<2)
         return false;
         
@@ -339,7 +339,7 @@ function handmadeimap_select($connection, $mailboxname)
     $result = array();
     foreach ($selectresult['infolines'] as $infoline)
     {
-        $infoparts = split(' ', $infoline);
+        $infoparts = explode(' ', $infoline);
                 
         if (isset($infoparts[2]))
         {
