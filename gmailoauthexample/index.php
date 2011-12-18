@@ -246,6 +246,8 @@ function handle_gmail_oauth()
         $sent = fetch_senders_and_recipients($connection, $sentmailbox, 500);
         $sentto = $sent['to'];
         $sentfrom = $sent['from'];
+        
+        handmadeimap_close_connection($connection);
 
         $rankedfriends = array();
         foreach ($receivedfrom as $address => $receivedinfo)

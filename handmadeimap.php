@@ -261,6 +261,11 @@ function handmadeimap_open_connection($serverurl, $serverport)
 // Closes the mail server connection
 function handmadeimap_close_connection($connection)
 {
+    $loginid = handmadeimap_send_command($connection, "LOGOUT");
+    $loginresult = handmadeimap_get_command_result($connection, $loginid);
+    $loginwasok = handmadeimap_was_command_ok($loginresult['resultline']);
+    if (!$loginwasok)
+        handmadeimap_set_error("LOGOUT failed with '".$loginresult['resultline']."'");
     fclose($connection);
 }
 
@@ -791,6 +796,7 @@ function handmadeimap_test_envelope_parsing()
  * @param resource $connection Connection resource (returned from handmadeimap_open_connection())
  * @param string $pattern String to search for.
  * @return array Array containing ids of matching messages.
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
  */
 function handmadeimap_search_gmail_message($connection, $pattern)
 {
@@ -817,14 +823,16 @@ function handmadeimap_search_gmail_message($connection, $pattern)
 }
 
 /**
- * Fetches message body.
+ * Fetches body of a single message.
  * @param resource $connection Connection resource.
  * @param int $messageindex Id of the message.
  * @return string Raw message body. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
  */
 function handmadeimap_fetch_message_body($connection, $messageindex)
 {
     $fetchcommand = "FETCH $messageindex (BODY[TEXT])";
+
     $fetchid = handmadeimap_send_command($connection, $fetchcommand);
     $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
     $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
@@ -835,9 +843,41 @@ function handmadeimap_fetch_message_body($connection, $messageindex)
     
     $result = "";
     
-    foreach ($fetchresult['infolines'] as $infoline)
-        $result .= handmadeimap_parse_message_body($messageindex, $infoline);
+    foreach ($fetchresult['infolines'] as $infoline){
+        $result .= str_replace("* $messageindex FETCH (BODY[TEXT] ", "", $infoline);
+    }
     
+    $result = quoted_printable_decode($result);
+    if(preg_match("/Content-Transfer-Encoding: base64(.*)/", $result, $match)){
+        return base64_decode($match[1]);
+}
+    return $result;
+}
+
+/**
+ * Fetches size of the message according to RFC 822.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return string Message size. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_fetch_size($connection, $messageindex){
+    $fetchcommand = "FETCH $messageindex RFC822.SIZE";
+    
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+    
+    $result = "";
+    
+    foreach ($fetchresult['infolines'] as $infoline){
+        $result = str_replace("* $messageindex FETCH (RFC822.SIZE ", "", $infoline);
+        $result = str_replace(")", "", $result);
+    }
     return $result;
 }
 
@@ -846,10 +886,143 @@ function handmadeimap_fetch_message_body($connection, $messageindex)
  * @param int $index Index of the message that was fetched.
  * @param string $message Raw message.
  * @return string Cleared message. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
  */
 function handmadeimap_parse_message_body($index, $message){
     $message = str_replace("* $index FETCH (BODY[TEXT] ", "", $message);
     return $message;
+}
+
+/**
+ * Fetches envelope of a single message.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return array Information from the envelope. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_fetch_envelope($connection, $messageindex)
+{
+    $fetchcommand = "FETCH $messageindex (ENVELOPE)";
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+
+    $result = array();
+    foreach ($fetchresult['infolines'] as $infoline)
+        $result[] = handmadeimap_parse_envelope_line($infoline);  
+    return $result;
+}
+
+/**
+ * Fetches flags and envelope of a single message.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return array Basic information, parsed by handmadeimap_parse_flags_line()
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_fetch_flags($connection, $messageindex)
+{
+    $fetchcommand = "FETCH $messageindex (FLAGS ENVELOPE)";
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+
+    $result = array();
+    foreach ($fetchresult['infolines'] as $infoline)
+        $result[] = handmadeimap_parse_flags_line($infoline);
+   
+    return $result;
+}
+
+/**
+ * Parses flags from the message and returns basic information.
+ * @param string $line Fetched line.
+ * @return array Message id, sender, flags and date sent. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_parse_flags_line($line){
+    $line = string_to_expression_tree($line);
+    $from = $line[3][3][2][0][0];
+    if($from == "NIL"){
+	$from = $line[3][3][2][0][3];
+    }
+    $r = array(
+        "msg_id" => $line[1],
+	"from" => $from,
+	"flags" => $line[3][1],
+	"date" => $line[3][3][0]
+    );
+    return $r;
+}
+
+/**
+ * Searches unseen messages sent after given date.
+ * @param resource $connection Connection resource.
+ * @param int $messageindex Id of the message.
+ * @return array List of the messages ids. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_search_unread_since_date($connection, $date)
+{
+    $searchid = handmadeimap_send_command($connection, 'SEARCH UNSEEN SINCE '.$date);
+    $searchresult = handmadeimap_get_command_result($connection, $searchid);
+    $searchwasok = handmadeimap_was_command_ok($searchresult['resultline']);
+    if (!$searchwasok)
+        handmadeimap_set_error("SEARCH failed with '".$searchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+
+    $result = array();
+    foreach ($searchresult['infolines'] as $infoline)
+    {
+        $parts = split(' ', $infoline);
+        // Remove "* SEARCH"
+        unset($parts[0]);
+        unset($parts[1]);
+    
+        $result = array_merge($result, $parts);
+    }
+    
+    return $result;
+}
+
+/**
+ * Fetches bodies of given messages.
+ * @param resource $connection Connection resource.
+ * @param array $messagesindex Ids of the messages to fetch.
+ * @return array Parsed text of the messages. 
+ * @author Paulina Budzoń <paulina.budzon@gmail.com>
+ */
+function handmadeimap_fetch_messages_body($connection, $messagesindex)
+{
+    $fetchcommand = "FETCH $messagesindex (BODY[TEXT])"; 
+    $fetchid = handmadeimap_send_command($connection, $fetchcommand);
+    $fetchresult = handmadeimap_get_command_result($connection, $fetchid);
+    $fetchwasok = handmadeimap_was_command_ok($fetchresult['resultline']);
+    if (!$fetchwasok)
+        handmadeimap_set_error("FETCH failed with '".$fetchresult['resultline']."'");
+    else
+        handmadeimap_set_error(null);
+    
+    $result = array();
+
+    foreach ($fetchresult['infolines'] as $infoline){
+        $r = quoted_printable_decode($infoline);
+	if(preg_match("/Content-Transfer-Encoding: base64(.*)/", $r, $match)){
+	    $r = base64_decode($match[1]);
+	}
+	$result[] = $r;
+    }
+
+    return $result;
 }
 
 
