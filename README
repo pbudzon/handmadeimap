@@ -1,4 +1,18 @@
-HandmadeIMAP
+Fork of HandmadeIMAP
+~~~~~~~~~~~~
+
+Few notes about this repository:
+- we maintain the "master" branch that is a basic fork from the original project. 
+It will contain original files that will be updated and extended.
+
+- "gmail_oauth" branch focuses directly on Gmail and is our priority. All updates
+to "master" branch will come from features developed in this branch and will be ported
+to maintain compatibility. 
+
+Feel free to contact me via github or <paulina.budzon@gmail.com>
+
+
+Original message and license info by Pete Warden: 
 ~~~~~~~~~~~~
 
 This collection implements the IMAP and POP3 protocols for accessing message information from 
