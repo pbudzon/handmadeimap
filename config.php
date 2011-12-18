@@ -9,8 +9,8 @@
  *
  */
 
-define ('GOOGLE_API_KEY_PUBLIC', '359593241049.apps.googleusercontent.com');
-define ('GOOGLE_API_KEY_PRIVATE', 'mMckheemZJAhB5NXXhhVgIe-');
+define ('GOOGLE_API_KEY_PUBLIC', 'anonymous');
+define ('GOOGLE_API_KEY_PRIVATE', 'anonymous');
 
 if (GOOGLE_API_KEY_PUBLIC === '')
     die('You need to edit config.php to add your own API keys before you can use this example');
